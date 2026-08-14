@@ -15,6 +15,7 @@ on:
       - "scripts/tests/**"
       - "releases/package_firmware.py"
       - "releases/download_artifacts.py"
+      - "releases/validate_github_release.py"
       - "releases/validate_release_artifacts.py"
       - "releases/validate_firmware.py"
       - "releases/tests/**"
@@ -29,6 +30,7 @@ on:
       - "scripts/tests/**"
       - "releases/package_firmware.py"
       - "releases/download_artifacts.py"
+      - "releases/validate_github_release.py"
       - "releases/validate_release_artifacts.py"
       - "releases/validate_firmware.py"
       - "releases/tests/**"
@@ -306,6 +308,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "$GITHUB_REF_NAME" \
+            --notes "Verified firmware archives for ESP32-C5-LCD-1.47." \
             --generate-notes \
             --draft
       - name: Upload release assets
@@ -321,45 +324,46 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_DIGEST_ATTEMPTS: "12"
+          RELEASE_DIGEST_RETRY_SECONDS: "5"
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > uploaded-release.json
-          python3 - <<'PY'
-          import hashlib
-          import json
-          import os
-          from pathlib import Path
-
-          def sha256(path):
-              digest = hashlib.sha256()
-              with path.open("rb") as source:
-                  for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                      digest.update(chunk)
-              return f"sha256:{digest.hexdigest()}"
-
-          release = json.loads(Path("uploaded-release.json").read_text(encoding="utf-8"))
-          local_assets = {
-              path.name: sha256(path) for path in Path("release-artifacts").glob("*.zip")
-          }
-          remote_assets = {
-              asset["name"]: asset.get("digest") for asset in release.get("assets", [])
-          }
-          if local_assets != remote_assets:
-              raise SystemExit(
-                  "Release asset names or SHA-256 digests differ:\n"
-                  f"local={json.dumps(local_assets, sort_keys=True)}\n"
-                  f"remote={json.dumps(remote_assets, sort_keys=True)}"
-              )
-          if release.get("draft") is not True:
-              raise SystemExit("Release must remain a draft until verification completes")
-          if release.get("tag_name") != os.environ["RELEASE_TAG"]:
-              raise SystemExit("Release tag metadata does not match the workflow tag")
-          if release.get("name") != os.environ["RELEASE_TAG"]:
-              raise SystemExit("Release title does not match the workflow tag")
-          if release.get("prerelease") is not False:
-              raise SystemExit("Stable release workflow must not publish a prerelease")
-          if not str(release.get("body") or "").strip():
-              raise SystemExit("Generated release notes must not be empty")
-          PY
+          verified=false
+          for ((attempt = 1; attempt <= RELEASE_DIGEST_ATTEMPTS; attempt++)); do
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > uploaded-release.json
+            if python3 releases/validate_github_release.py \
+              uploaded-release.json \
+              release-artifacts \
+              --tag "$RELEASE_TAG"; then
+              verified=true
+              break
+            else
+              status=$?
+            fi
+            if [ "$status" -ne 75 ]; then
+              exit "$status"
+            fi
+            if [ "$attempt" -eq "$RELEASE_DIGEST_ATTEMPTS" ]; then
+              echo "GitHub digests are still pending; downloading assets for byte verification"
+              mkdir uploaded-release-assets
+              gh release download "$GITHUB_REF_NAME" \
+                --repo "$GITHUB_REPOSITORY" \
+                --dir uploaded-release-assets \
+                --pattern "*.zip"
+              python3 releases/validate_github_release.py \
+                uploaded-release.json \
+                release-artifacts \
+                --tag "$RELEASE_TAG" \
+                --downloaded-assets uploaded-release-assets
+              verified=true
+              break
+            fi
+            echo "GitHub Release asset digests are pending; retrying ($attempt/$RELEASE_DIGEST_ATTEMPTS)"
+            sleep "$RELEASE_DIGEST_RETRY_SECONDS"
+          done
+          if [ "$verified" != "true" ]; then
+            echo "GitHub Release verification did not complete" >&2
+            exit 1
+          fi
       - name: Publish verified release
         env:
           GH_TOKEN: ${{ github.token }}

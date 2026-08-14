@@ -8,6 +8,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github/workflows/examples.yml"
 WORKFLOWS_DIR = REPO_ROOT / ".github/workflows"
+RELEASE_VALIDATOR = REPO_ROOT / "releases/validate_github_release.py"
 
 
 class ExamplesWorkflowTests(unittest.TestCase):
@@ -51,6 +52,7 @@ class ExamplesWorkflowTests(unittest.TestCase):
 
     def test_release_is_draft_until_assets_are_verified(self) -> None:
         release = self.workflow.split("  release:\n", 1)[1]
+        validator = RELEASE_VALIDATOR.read_text(encoding="utf-8")
         create = release.index("Prepare draft release")
         upload = release.index("Upload release assets")
         verify = release.index("Verify draft asset inventory")
@@ -63,13 +65,19 @@ class ExamplesWorkflowTests(unittest.TestCase):
         self.assertIn('gh release delete "$GITHUB_REF_NAME"', release)
         self.assertNotIn("--cleanup-tag", release)
         self.assertIn('--title "$GITHUB_REF_NAME"', release)
+        self.assertIn('--notes "Verified firmware archives', release)
         self.assertIn("--clobber", release)
-        self.assertIn('asset.get("digest")', release)
-        self.assertIn("if local_assets != remote_assets", release)
-        self.assertIn("Release must remain a draft", release)
-        self.assertIn('release.get("name") != os.environ["RELEASE_TAG"]', release)
-        self.assertIn('release.get("prerelease") is not False', release)
-        self.assertIn("Generated release notes must not be empty", release)
+        self.assertIn("python3 releases/validate_github_release.py", release)
+        self.assertIn("RELEASE_DIGEST_ATTEMPTS", release)
+        self.assertIn('if [ "$status" -ne 75 ]', release)
+        self.assertIn('gh release download "$GITHUB_REF_NAME"', release)
+        self.assertIn("--downloaded-assets uploaded-release-assets", release)
+        self.assertIn('asset.get("digest")', validator)
+        self.assertIn("GitHub Release asset digests differ", validator)
+        self.assertIn("Release must remain a draft", validator)
+        self.assertIn('release.get("name") != tag', validator)
+        self.assertIn('release.get("prerelease") is not False', validator)
+        self.assertIn("generated release notes must not be empty", validator)
         self.assertIn("--draft=false", release)
 
     def test_permissions_and_stable_semver_gate_are_scoped(self) -> None:
@@ -89,6 +97,7 @@ class ExamplesWorkflowTests(unittest.TestCase):
 
     def test_downloader_changes_trigger_validation(self) -> None:
         self.assertEqual(self.workflow.count('"releases/download_artifacts.py"'), 2)
+        self.assertEqual(self.workflow.count('"releases/validate_github_release.py"'), 2)
 
     def test_c5_component_registry_dependencies_are_exactly_pinned(self) -> None:
         manifests = sorted((REPO_ROOT / "examples/esp-idf").glob("*/main/idf_component.yml"))
