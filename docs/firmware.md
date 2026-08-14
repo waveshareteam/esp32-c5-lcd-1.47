@@ -34,13 +34,16 @@ compatibility fallback.
 After extracting an archive, install esptool and use the included helper:
 
 ```text
+python -m pip install esptool
 python3 -m pip install esptool
-./flash.sh /dev/ttyACM0
 py -3 -m pip install esptool
+./flash.sh /dev/ttyACM0
 flash.bat COMx
 ```
 
-Use the first two commands on Linux or macOS and the last two on Windows.
+Only one install command is needed. The shell helper detects `python` or
+`python3`; the Windows helper detects `python` or `py -3`. Use `flash.sh` on
+Linux or macOS and `flash.bat` on Windows.
 
 The manifest records the board, target, framework version, source project,
 source commit, segment offsets, hashes, and equivalent esptool command.

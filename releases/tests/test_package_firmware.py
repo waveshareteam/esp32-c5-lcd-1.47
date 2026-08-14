@@ -13,6 +13,8 @@ from pathlib import Path
 RELEASES_DIR = Path(__file__).resolve().parents[1]
 PACKAGE_SCRIPT = RELEASES_DIR / "package_firmware.py"
 VALIDATE_SCRIPT = RELEASES_DIR / "validate_firmware.py"
+sys.path.insert(0, str(RELEASES_DIR))
+import package_firmware  # noqa: E402
 
 
 def esp_image(chip_id: int = 23, size: int = 32) -> bytes:
@@ -136,14 +138,18 @@ class PackageFirmwareTests(unittest.TestCase):
             self.assertEqual(manifest["timestamp_utc"], "1970-01-01T00:00:00Z")
             self.assertEqual(manifest["git_sha"], "0123456789abcdef")
             self.assertEqual(len(manifest["files"]), 4)
-            self.assertTrue(manifest["flash_command"].startswith("python3 -m esptool "))
+            self.assertTrue(manifest["flash_command"].startswith("python -m esptool "))
             self.assertIn(
-                "'python3' '-m' 'esptool'",
+                '"$PYTHON" \'-m\' \'esptool\'',
                 package.read(f"{artifact_name}/flash.sh").decode("utf-8"),
             )
             self.assertIn(
                 "'--port' \"$PORT\"",
                 package.read(f"{artifact_name}/flash.sh").decode("utf-8"),
+            )
+            self.assertIn(
+                '"python" "-m" "esptool"',
+                package.read(f"{artifact_name}/flash.bat").decode("utf-8"),
             )
             self.assertIn(
                 '"py" "-3" "-m" "esptool"',
@@ -154,10 +160,86 @@ class PackageFirmwareTests(unittest.TestCase):
                 package.read(f"{artifact_name}/flash.bat").decode("utf-8"),
             )
             self.assertIn(
-                "python3 -m pip install esptool",
+                "python -m pip install esptool",
                 package.read(f"{artifact_name}/README.md").decode("utf-8"),
             )
             self.assertTrue(all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in package.infolist()))
+
+    def test_flash_shell_selects_an_interpreter_with_esptool(self) -> None:
+        helper_dir = self.repo / "helper"
+        helper_dir.mkdir()
+        command = package_firmware.esptool_command(
+            "esp32c5",
+            "default-reset",
+            "hard-reset",
+            [],
+            "bin/demo.combined.bin",
+        )
+        package_firmware.write_flash_helpers(helper_dir, command, "demo")
+
+        fake_bin = self.repo / "fake-bin"
+        fake_bin.mkdir()
+        launchers = {
+            "python": "FAKE_PYTHON_IMPORT_STATUS",
+            "python3": "FAKE_PYTHON3_IMPORT_STATUS",
+        }
+        for launcher, status_variable in launchers.items():
+            path = fake_bin / launcher
+            path.write_text(
+                f'''#!/bin/sh
+if [ "${{1:-}}" = "-c" ]; then
+    exit "${{{status_variable}:-0}}"
+fi
+printf '%s\n' '{launcher}' > "$CAPTURE_LAUNCHER"
+printf '%s\n' "$@" > "$CAPTURE_ARGS"
+''',
+                encoding="utf-8",
+            )
+            path.chmod(0o755)
+
+        capture_launcher = self.repo / "launcher.txt"
+        capture_args = self.repo / "args.txt"
+        base_env = {
+            **os.environ,
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "CAPTURE_LAUNCHER": str(capture_launcher),
+            "CAPTURE_ARGS": str(capture_args),
+        }
+        cases = (
+            ("0", "0", "python"),
+            ("1", "0", "python3"),
+        )
+        for python_status, python3_status, expected in cases:
+            with self.subTest(expected=expected):
+                result = subprocess.run(
+                    ["/bin/sh", str(helper_dir / "flash.sh"), "/dev/tty USB0"],
+                    capture_output=True,
+                    text=True,
+                    env={
+                        **base_env,
+                        "FAKE_PYTHON_IMPORT_STATUS": python_status,
+                        "FAKE_PYTHON3_IMPORT_STATUS": python3_status,
+                    },
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(capture_launcher.read_text(encoding="utf-8").strip(), expected)
+                arguments = capture_args.read_text(encoding="utf-8").splitlines()
+                self.assertEqual(arguments[:2], ["-m", "esptool"])
+                port_index = arguments.index("--port")
+                self.assertEqual(arguments[port_index + 1], "/dev/tty USB0")
+
+        unavailable = subprocess.run(
+            ["/bin/sh", str(helper_dir / "flash.sh"), "/dev/ttyUSB0"],
+            capture_output=True,
+            text=True,
+            env={
+                **base_env,
+                "FAKE_PYTHON_IMPORT_STATUS": "1",
+                "FAKE_PYTHON3_IMPORT_STATUS": "1",
+            },
+        )
+        self.assertEqual(unavailable.returncode, 127)
+        self.assertIn("esptool is not installed", unavailable.stderr)
 
     def test_arduino_exported_binaries_are_combined_and_validated(self) -> None:
         project = self.repo / "examples/arduino/demo"

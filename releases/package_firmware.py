@@ -355,7 +355,14 @@ def arduino_segments(
 
 
 def shell_command(parts: Iterable[str]) -> str:
-    return " ".join('"$PORT"' if part == "$PORT" else quote_shell(part) for part in parts)
+    return " ".join(
+        '"$PYTHON"'
+        if part == "$PYTHON"
+        else '"$PORT"'
+        if part == "$PORT"
+        else quote_shell(part)
+        for part in parts
+    )
 
 
 def batch_command(parts: Iterable[str]) -> str:
@@ -366,7 +373,7 @@ def esptool_command(chip: str, before: str, after: str, write_args: list[str], i
     before = before.replace("_", "-")
     after = after.replace("_", "-")
     return [
-        "python3",
+        "python",
         "-m",
         "esptool",
         "--chip",
@@ -387,7 +394,8 @@ def esptool_command(chip: str, before: str, after: str, write_args: list[str], i
 
 
 def write_flash_helpers(package_dir: Path, command: list[str], artifact_name: str) -> None:
-    batch_parts = ["py", "-3", *command[1:]]
+    shell_parts = ["$PYTHON", *command[1:]]
+    py_batch_parts = ["py", "-3", *command[1:]]
     shell = f'''#!/usr/bin/env sh
 set -eu
 PORT="${{1:-}}"
@@ -396,16 +404,48 @@ if [ -z "$PORT" ]; then
     exit 2
 fi
 cd "$(dirname "$0")"
-{shell_command(command)}
+if command -v python >/dev/null 2>&1 && python -c 'import esptool' >/dev/null 2>&1; then
+    PYTHON=python
+elif command -v python3 >/dev/null 2>&1 && python3 -c 'import esptool' >/dev/null 2>&1; then
+    PYTHON=python3
+else
+    echo "Error: esptool is not installed for Python 3." >&2
+    echo "Install it with: python -m pip install esptool" >&2
+    echo "Or use: python3 -m pip install esptool" >&2
+    exit 127
+fi
+{shell_command(shell_parts)}
 '''
     batch = f'''@echo off
+setlocal
 set "PORT=%~1"
 if "%PORT%"=="" (
   echo Usage: flash.bat COMx
   exit /b 2
 )
 cd /d "%~dp0"
-{batch_command(batch_parts)}
+where python >nul 2>&1
+if not errorlevel 1 (
+  "python" "-c" "import esptool" >nul 2>&1
+  if not errorlevel 1 goto use_python
+)
+where py >nul 2>&1
+if not errorlevel 1 (
+  "py" "-3" "-c" "import esptool" >nul 2>&1
+  if not errorlevel 1 goto use_py
+)
+echo Error: esptool is not installed for Python 3. 1>&2
+echo Install it with: python -m pip install esptool 1>&2
+echo Or use: py -3 -m pip install esptool 1>&2
+exit /b 127
+
+:use_python
+{batch_command(command)}
+exit /b %ERRORLEVEL%
+
+:use_py
+{batch_command(py_batch_parts)}
+exit /b %ERRORLEVEL%
 '''
     args_text = " ".join("<PORT>" if item == "$PORT" else item for item in command) + "\n"
     write_text(package_dir / "flash.sh", shell, executable=True)
@@ -415,15 +455,22 @@ cd /d "%~dp0"
         package_dir / "README.md",
         f'''# {artifact_name}
 
-Install `esptool` with `python3 -m pip install esptool`, then flash the complete
-image at offset `0x0` on Linux or macOS:
+Install `esptool` with a Python 3 launcher available on your system:
+
+```text
+python -m pip install esptool
+python3 -m pip install esptool
+py -3 -m pip install esptool
+```
+
+Only one command is needed. The helpers detect an interpreter that can import
+`esptool`. Then flash the complete image at offset `0x0` on Linux or macOS:
 
 ```bash
 ./flash.sh /dev/ttyUSB0
 ```
 
-On Windows, install with `py -3 -m pip install esptool`, then use
-`flash.bat COMx`.
+On Windows, use `flash.bat COMx`.
 
 The archive contains only firmware produced by this source build. External
 storage content, credentials, and device-specific runtime data are not included.

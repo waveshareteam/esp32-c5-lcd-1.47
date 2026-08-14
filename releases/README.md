@@ -19,14 +19,17 @@ bin/*.bin
 
 The helpers write one combined image at flash offset `0x0`. For ESP32-C5, the
 combined image contains erased-flash padding before the bootloader header at
-`0x2000`. Install esptool before using a helper on Linux or macOS:
+`0x2000`. Install esptool with an available Python 3 launcher:
 
 ```bash
+python -m pip install esptool
 python3 -m pip install esptool
+py -3 -m pip install esptool
 ./flash.sh /dev/ttyUSB0
 ```
 
-On Windows, run `py -3 -m pip install esptool` and then `flash.bat COMx`.
+Only one install command is needed. `flash.sh` detects `python` or `python3`;
+`flash.bat` detects `python` or `py -3`. On Windows, run `flash.bat COMx`.
 
 ## Package An ESP-IDF Build
 

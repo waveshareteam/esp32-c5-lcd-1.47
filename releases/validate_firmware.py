@@ -114,8 +114,8 @@ def expected_flash_helpers(manifest: dict[str, Any]) -> dict[str, bytes]:
         raise ValueError("flash_command is not valid shell-style text") from exc
     if " ".join(tokens) != command:
         raise ValueError("flash_command must use canonical single-space formatting")
-    if tokens[:3] != ["python3", "-m", "esptool"]:
-        raise ValueError("flash_command must invoke python3 -m esptool")
+    if tokens[:3] not in (["python", "-m", "esptool"], ["python3", "-m", "esptool"]):
+        raise ValueError("flash_command must invoke python or python3 -m esptool")
     if option_value(tokens, "--chip") != manifest["target"]:
         raise ValueError("flash_command chip does not match the manifest target")
     if option_value(tokens, "--port") != "<PORT>":
@@ -127,16 +127,19 @@ def expected_flash_helpers(manifest: dict[str, Any]) -> dict[str, bytes]:
     if tokens[-2:] != ["0x0", manifest["combined_bin"]]:
         raise ValueError("flash_command must write the combined image at offset 0x0")
 
-    shell_tokens = ["$PORT" if token == "<PORT>" else token for token in tokens]
-    shell_command = " ".join(
-        '"$PORT"' if token == "$PORT" else quote_shell(token) for token in shell_tokens
-    )
-    batch_tokens = ["py", "-3", *tokens[1:]]
-    batch_tokens = ["%PORT%" if token == "<PORT>" else token for token in batch_tokens]
-    batch_command = " ".join(
-        '"%PORT%"' if token == "%PORT%" else quote_batch(token) for token in batch_tokens
-    )
-    shell = f'''#!/usr/bin/env sh
+    if tokens[0] == "python3":
+        shell_tokens = ["$PORT" if token == "<PORT>" else token for token in tokens]
+        shell_command = " ".join(
+            '"$PORT"' if token == "$PORT" else quote_shell(token)
+            for token in shell_tokens
+        )
+        batch_tokens = ["py", "-3", *tokens[1:]]
+        batch_tokens = ["%PORT%" if token == "<PORT>" else token for token in batch_tokens]
+        batch_command = " ".join(
+            '"%PORT%"' if token == "%PORT%" else quote_batch(token)
+            for token in batch_tokens
+        )
+        shell = f'''#!/usr/bin/env sh
 set -eu
 PORT="${{1:-}}"
 if [ -z "$PORT" ]; then
@@ -146,7 +149,7 @@ fi
 cd "$(dirname "$0")"
 {shell_command}
 '''
-    batch = f'''@echo off
+        batch = f'''@echo off
 set "PORT=%~1"
 if "%PORT%"=="" (
   echo Usage: flash.bat COMx
@@ -154,6 +157,84 @@ if "%PORT%"=="" (
 )
 cd /d "%~dp0"
 {batch_command}
+'''
+        return {
+            "flash.sh": shell.encode("utf-8"),
+            "flash.bat": batch.encode("utf-8"),
+            "flash_args.txt": (command + "\n").encode("utf-8"),
+        }
+
+    shell_tokens = ["$PYTHON", *tokens[1:]]
+    shell_tokens = ["$PORT" if token == "<PORT>" else token for token in shell_tokens]
+    shell_command = " ".join(
+        '"$PYTHON"'
+        if token == "$PYTHON"
+        else '"$PORT"'
+        if token == "$PORT"
+        else quote_shell(token)
+        for token in shell_tokens
+    )
+    python_batch_tokens = ["%PORT%" if token == "<PORT>" else token for token in tokens]
+    py_batch_tokens = ["py", "-3", *tokens[1:]]
+    py_batch_tokens = ["%PORT%" if token == "<PORT>" else token for token in py_batch_tokens]
+    python_batch_command = " ".join(
+        '"%PORT%"' if token == "%PORT%" else quote_batch(token)
+        for token in python_batch_tokens
+    )
+    py_batch_command = " ".join(
+        '"%PORT%"' if token == "%PORT%" else quote_batch(token)
+        for token in py_batch_tokens
+    )
+    shell = f'''#!/usr/bin/env sh
+set -eu
+PORT="${{1:-}}"
+if [ -z "$PORT" ]; then
+    echo "Usage: $0 /dev/ttyUSB0"
+    exit 2
+fi
+cd "$(dirname "$0")"
+if command -v python >/dev/null 2>&1 && python -c 'import esptool' >/dev/null 2>&1; then
+    PYTHON=python
+elif command -v python3 >/dev/null 2>&1 && python3 -c 'import esptool' >/dev/null 2>&1; then
+    PYTHON=python3
+else
+    echo "Error: esptool is not installed for Python 3." >&2
+    echo "Install it with: python -m pip install esptool" >&2
+    echo "Or use: python3 -m pip install esptool" >&2
+    exit 127
+fi
+{shell_command}
+'''
+    batch = f'''@echo off
+setlocal
+set "PORT=%~1"
+if "%PORT%"=="" (
+  echo Usage: flash.bat COMx
+  exit /b 2
+)
+cd /d "%~dp0"
+where python >nul 2>&1
+if not errorlevel 1 (
+  "python" "-c" "import esptool" >nul 2>&1
+  if not errorlevel 1 goto use_python
+)
+where py >nul 2>&1
+if not errorlevel 1 (
+  "py" "-3" "-c" "import esptool" >nul 2>&1
+  if not errorlevel 1 goto use_py
+)
+echo Error: esptool is not installed for Python 3. 1>&2
+echo Install it with: python -m pip install esptool 1>&2
+echo Or use: py -3 -m pip install esptool 1>&2
+exit /b 127
+
+:use_python
+{python_batch_command}
+exit /b %ERRORLEVEL%
+
+:use_py
+{py_batch_command}
+exit /b %ERRORLEVEL%
 '''
     return {
         "flash.sh": shell.encode("utf-8"),

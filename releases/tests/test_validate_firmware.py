@@ -134,6 +134,23 @@ class ValidateFirmwareTests(unittest.TestCase):
     def test_valid_fixture_is_accepted(self) -> None:
         validate_firmware.validate_zip(self.archive, self.board_contract)
 
+    def test_legacy_python3_flash_helpers_remain_supported(self) -> None:
+        manifest = {
+            "flash_command": (
+                "python3 -m esptool --chip esp32c5 --port <PORT> --baud 460800 "
+                "--before default-reset --after hard-reset write-flash 0x0 bin/demo.bin"
+            ),
+            "target": "esp32c5",
+            "baud": "460800",
+            "combined_bin": "bin/demo.bin",
+        }
+
+        helpers = validate_firmware.expected_flash_helpers(manifest)
+
+        self.assertIn(b"'python3' '-m' 'esptool'", helpers["flash.sh"])
+        self.assertIn(b'"py" "-3" "-m" "esptool"', helpers["flash.bat"])
+        self.assertEqual(helpers["flash_args.txt"], (manifest["flash_command"] + "\n").encode())
+
     def test_rejects_tampered_combined_image_even_with_updated_digest(self) -> None:
         def mutate(members: dict[str, bytes]) -> None:
             manifest_name, manifest = self.manifest_entry(members)
