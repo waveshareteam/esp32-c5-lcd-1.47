@@ -1,56 +1,62 @@
-# Waveshare ESP32-C5-LCD-1.47 示例程序
+# Waveshare ESP32-C5-LCD-1.47
 
 [English](README.md)
 
-ESP32-C5-LCD-1.47 是一款基于 ESP32-C5 的紧凑型开发板，集成 1.47 英寸 LCD 屏，支持 Wi-Fi 6、Bluetooth 5 LE 和 IEEE 802.15.4 无线连接能力。仓库提供 LCD 显示、背光控制、RGB LED、microSD 卡、SPIFFS 和 Wi-Fi 等功能示例，便于快速搭建和验证嵌入式显示与无线物联网应用。
+ESP32-C5-LCD-1.47 是一款基于 ESP32-C5 的紧凑型开发板，内置 4 MB Flash，
+集成 1.47 英寸 172 x 320 ST7789 SPI LCD、microSD 卡槽和一颗 WS2812B RGB LED。
+本板不带触摸控制器、音频编解码器、RTC、I/O 扩展器或板载 PSRAM。官方产品页
+与仓库内原理图对芯片后缀的标注不一致（`ESP32-C5FH4` 与 `ESP32-C5HF4`），具体
+差异见硬件参考，不应只依据其中一个来源推断变体。ESP32-C5 支持 Wi-Fi 6、
+Bluetooth LE 和 IEEE 802.15.4；本仓库目前提供 Wi-Fi 扫描示例，但尚未提供
+Bluetooth 或 802.15.4 示例。
 
 - [购买链接](https://www.waveshare.net/shop/ESP32-C5-LCD-1.47.htm)
 - [产品文档](https://docs.waveshare.net/ESP32-C5-LCD-1.47/)
+- [硬件参考](HARDWARE_REFERENCE_CN.md)
 
-![主图](./assets/Product-1.webp)
+![ESP32-C5-LCD-1.47](assets/Product-1.webp)
 
----
+## 仓库内容
 
-## 🔧 配置
+仓库包含 8 组一一对应的 ESP-IDF 和 Arduino 示例、Arduino 显示库、工厂恢复
+固件、原理图及结构图纸。
 
-您可以在产品 Wiki 页面上找到详细的配置信息。
+| 示例 | 功能 |
+| --- | --- |
+| `01_lcd_panel_basic` | ST7789 初始化与直接绘图 |
+| `02_lvgl_hello` | LVGL 显示集成 |
+| `03_backlight_fade` | LCD 背光 PWM |
+| `04_ws2812_rgb` | 板载 RGB LED |
+| `05_sdcard_rw` | 通过共用 SPI 读写 microSD |
+| `06_spiffs_rw` | SPIFFS 读写 |
+| `07_wifi_scan` | Wi-Fi 网络扫描 |
+| `08_board_showcase` | 综合板卡自检 |
 
----
+首方工程位于 `examples/esp-idf/` 和 `examples/arduino/`，Arduino 库单独位于
+仓库根目录的 `libraries/`。
 
-## 🛠️ 贡献
+## 构建配置
 
-我们欢迎您的贡献！您可以通过以下方式提供帮助：
+ESP-IDF 工程以 `esp32c5` 为目标，并使用各工程的 `sdkconfig.defaults`。
+Arduino 编译必须加入 `--libraries libraries`；经过配置的完整 FQBN、Arduino
+CLI、Arduino-ESP32 和 ESP-IDF 版本统一保存在 `config/ci.json`。
 
-1. Fork 本仓库。
-2. 为您的新功能或 Bug 修复创建一个新分支。
-3. 提交您的更改并附上清晰的描述。
-4. 提交 Pull Request 以供审核。
+GitHub Actions 会自动发现示例并构建 24 个发布产物：8 个工程分别使用两个
+ESP-IDF 版本构建，再加 8 个 Arduino 示例。只有稳定的 `vMAJOR.MINOR.PATCH`
+标签、全部构建成功且所有 ZIP 均与标签提交匹配时，才会公开 GitHub Release。
+详情见[持续集成](docs/ci.md)和[固件说明](docs/firmware.md)。
 
----
+## 文档
 
-## 🧩 问题与支持
+- [硬件参考](HARDWARE_REFERENCE_CN.md)
+- [仓库结构](docs/repository-structure.md)
+- [组件说明](docs/components.md)
+- [固件归档](releases/README.md)
+- [贡献指南](CONTRIBUTING.md)
+- [技术支持](SUPPORT.md)
+- [安全策略](SECURITY.md)
 
-如果您遇到任何问题：
+## 许可证
 
-- 请先查看 [Issues](https://gitee.com/waveshare/esp32-c5-lcd-1.47/issues) 版块。
-- 创建一个新的 Issue 并提供详细信息。
-- 参考文档获取故障排除提示。
-- 联系微雪团队并提供订单号以获取技术支持。
-
----
-
-## 📜 许可
-
-本仓库中的项目自有文件遵循 Apache License 2.0 许可。`libraries/` 下的第三方库保留其原始许可证，详情请查看各库的元数据或许可文件。
-
----
-
-## 🙌 致谢
-
-- 感谢微雪电子提供的优秀硬件平台和软件支持。
-- 感谢乐鑫团队的持续支持。
-- 感谢让这些项目成为可能的开源贡献者。
-
----
-
-感谢您使用微雪电子产品！🚀
+本仓库中的项目自有文件遵循 Apache License 2.0。`libraries/` 下的第三方库
+保留其原始许可证，请查看各库的元数据和许可文件。

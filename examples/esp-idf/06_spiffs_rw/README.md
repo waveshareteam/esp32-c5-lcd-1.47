@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 
 This example mounts a SPIFFS partition named `storage`, writes a file, reads it back, and unmounts the filesystem.
 
-```powershell
-idf.py set-target esp32c5
-idf.py build flash monitor
+```bash
+idf.py -C examples/esp-idf/06_spiffs_rw set-target esp32c5
+idf.py -C examples/esp-idf/06_spiffs_rw build flash monitor
 ```

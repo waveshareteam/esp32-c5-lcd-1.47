@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 
 This example uses the ESP32-C5 Wi-Fi radio to scan nearby APs and prints the strongest printable ASCII SSIDs.
 
-```powershell
-idf.py set-target esp32c5
-idf.py build flash monitor
+```bash
+idf.py -C examples/esp-idf/07_wifi_scan set-target esp32c5
+idf.py -C examples/esp-idf/07_wifi_scan build flash monitor
 ```

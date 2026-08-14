@@ -10,3 +10,7 @@ sdkconfig
 sdkconfig.old
 managed_components/
 dependencies.lock
+
+# Repository CI and release outputs
+.ci-build/
+release-artifacts/

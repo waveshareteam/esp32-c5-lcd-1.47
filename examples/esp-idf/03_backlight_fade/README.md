@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 
 This example starts the LCD and continuously fades the backlight using `bsp_display_brightness_set()`.
 
-```powershell
-idf.py set-target esp32c5
-idf.py build flash monitor
+```bash
+idf.py -C examples/esp-idf/03_backlight_fade set-target esp32c5
+idf.py -C examples/esp-idf/03_backlight_fade build flash monitor
 ```

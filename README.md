@@ -1,56 +1,68 @@
-# Waveshare ESP32-C5-LCD-1.47 Sample Programs
+# Waveshare ESP32-C5-LCD-1.47
 
 [中文](README_CN.md)
 
-ESP32-C5-LCD-1.47 is a compact development board based on ESP32-C5, integrating a 1.47-inch LCD screen. It supports Wi-Fi 6, Bluetooth 5 LE, and IEEE 802.15.4 wireless connectivity, and provides sample programs for LCD display, backlight control, RGB LED, microSD card, SPIFFS, and Wi-Fi functions. It helps you quickly build and verify embedded display and wireless IoT applications.
+ESP32-C5-LCD-1.47 is a compact development board built around the
+ESP32-C5 with 4 MB embedded Flash. It integrates a 1.47-inch 172 x 320 ST7789
+SPI LCD, a microSD slot, and one WS2812B RGB LED. It has no onboard touch
+controller, audio codec, RTC, I/O expander, or PSRAM. The official product page
+and checked-in schematic disagree on the chip suffix (`ESP32-C5FH4` versus
+`ESP32-C5HF4`); see the hardware reference instead of inferring a variant from
+one source. The ESP32-C5 provides Wi-Fi 6, Bluetooth LE, and IEEE 802.15.4 radio
+capabilities; this repository currently includes a Wi-Fi scan example but no
+Bluetooth or 802.15.4 example.
 
 - [Purchase Link](https://www.waveshare.com/shop/ESP32-C5-LCD-1.47.htm)
 - [Product Documentation](https://docs.waveshare.com/ESP32-C5-LCD-1.47/)
+- [Hardware Reference](HARDWARE_REFERENCE.md)
 
-![Product Image](./assets/Product-1.webp)
+![ESP32-C5-LCD-1.47](assets/Product-1.webp)
 
----
+## Repository Contents
 
-## 🔧 Configuration
+The repository contains eight matching ESP-IDF and Arduino examples, vendored
+Arduino display libraries, factory recovery firmware, schematics, and
+mechanical drawings.
 
-You can find detailed configuration information on the product Wiki page.
+| Example | Purpose |
+| --- | --- |
+| `01_lcd_panel_basic` | ST7789 display initialization and direct drawing |
+| `02_lvgl_hello` | LVGL display integration |
+| `03_backlight_fade` | LCD backlight PWM |
+| `04_ws2812_rgb` | Onboard RGB LED |
+| `05_sdcard_rw` | microSD read/write over shared SPI |
+| `06_spiffs_rw` | SPIFFS read/write |
+| `07_wifi_scan` | Wi-Fi network scan |
+| `08_board_showcase` | Integrated board self-test |
 
----
+Direct projects live in `examples/esp-idf/` and `examples/arduino/`. Arduino
+libraries live separately in the repository-root `libraries/` directory.
 
-## 🛠️ Contributing
+## Build Configuration
 
-We welcome your contributions! You can help in the following ways:
+ESP-IDF projects target `esp32c5` and use their local `sdkconfig.defaults`.
+Arduino builds must include `--libraries libraries`; the complete tested FQBN,
+Arduino CLI version, Arduino-ESP32 version, and ESP-IDF versions are stored in
+`config/ci.json`.
 
-1. Fork this repository.
-2. Create a new branch for your feature or bug fix.
-3. Commit your changes with a clear description.
-4. Submit a Pull Request for review.
+GitHub Actions discovers all examples and builds a 24-item release matrix:
+eight projects on each of two ESP-IDF versions plus eight Arduino sketches.
+Stable `vMAJOR.MINOR.PATCH` tags can publish a GitHub Release only after every
+build succeeds and every ZIP is matched to the tag commit. See
+[Continuous Integration](docs/ci.md) and [Firmware](docs/firmware.md).
 
----
+## Documentation
 
-## 🧩 Issues and Support
+- [Hardware Reference](HARDWARE_REFERENCE.md)
+- [Repository Structure](docs/repository-structure.md)
+- [Components](docs/components.md)
+- [Firmware Archives](releases/README.md)
+- [Contributing](CONTRIBUTING.md)
+- [Support](SUPPORT.md)
+- [Security Policy](SECURITY.md)
 
-If you encounter any issues:
+## License
 
-- Please check the [Issues](https://gitee.com/waveshare/esp32-c5-lcd-1.47/issues) section first.
-- Create a new Issue and provide detailed information.
-- Refer to the documentation for troubleshooting tips.
-- Contact the Waveshare team and provide your order number for technical support.
-
----
-
-## 📜 License
-
-The project-specific files in this repository are licensed under the Apache License 2.0. Third-party libraries under `libraries/` retain their original licenses; check each library's metadata or license file for details.
-
----
-
-## 🙌 Acknowledgments
-
-- Thanks to Waveshare Electronics for providing the hardware platform and software support.
-- Thanks to the Espressif team for their continuous support.
-- Thanks to the open-source contributors who make these projects possible.
-
----
-
-Thank you for using Waveshare products! 🚀
+Project-specific files are licensed under the Apache License 2.0. Third-party
+libraries under `libraries/` retain their original licenses; check each
+library's metadata and license files.

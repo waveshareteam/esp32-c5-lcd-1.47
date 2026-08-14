@@ -7,5 +7,14 @@ dependencies:
     version: '>=5.3.0'
 
   waveshare/esp32_c5_lcd_1_47:
-    version: "*"
+    version: "1.0.0"
     public: true
+
+  espressif/esp_lvgl_port:
+    version: "2.9.0"
+
+  espressif/led_strip:
+    version: "3.0.3"
+
+  lvgl/lvgl:
+    version: "9.5.0"

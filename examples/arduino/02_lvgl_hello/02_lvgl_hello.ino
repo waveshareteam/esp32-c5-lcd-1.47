@@ -18,7 +18,7 @@
 #include <lvgl.h>
 
 #if LVGL_VERSION_MAJOR != 9 || LVGL_VERSION_MINOR != 5 || LVGL_VERSION_PATCH != 0
-#error "This example expects LVGL 9.5.0, the same version used by the ESP-IDF examples."
+#error "This example expects the repository-pinned LVGL 9.5.0 library."
 #endif
 
 #define LCD_H_RES              (172)

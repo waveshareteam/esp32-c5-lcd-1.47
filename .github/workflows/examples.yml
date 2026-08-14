@@ -1,0 +1,366 @@
+name: Build Examples and Firmware
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - dev
+    tags:
+      - "v*"
+    paths:
+      - ".github/workflows/examples.yml"
+      - "config/ci.json"
+      - "scripts/discover_examples.py"
+      - "scripts/tests/**"
+      - "releases/package_firmware.py"
+      - "releases/download_artifacts.py"
+      - "releases/validate_release_artifacts.py"
+      - "releases/validate_firmware.py"
+      - "releases/tests/**"
+      - "examples/esp-idf/**"
+      - "examples/arduino/**"
+      - "libraries/**"
+  pull_request:
+    paths:
+      - ".github/workflows/examples.yml"
+      - "config/ci.json"
+      - "scripts/discover_examples.py"
+      - "scripts/tests/**"
+      - "releases/package_firmware.py"
+      - "releases/download_artifacts.py"
+      - "releases/validate_release_artifacts.py"
+      - "releases/validate_firmware.py"
+      - "releases/tests/**"
+      - "examples/esp-idf/**"
+      - "examples/arduino/**"
+      - "libraries/**"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "all, an example name, or a repo-relative example path"
+        required: false
+        default: "all"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: examples-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-tooling:
+    name: Validate CI and release tooling
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Validate stable release tag
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release tags must use stable SemVer: vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          tagged_commit="$(git rev-parse "$RELEASE_TAG^{commit}")"
+          checked_out_commit="$(git rev-parse HEAD)"
+          if [ "$tagged_commit" != "$GITHUB_SHA" ] || [ "$checked_out_commit" != "$GITHUB_SHA" ]; then
+            echo "Release tag, checked-out commit, and workflow commit do not match" >&2
+            exit 1
+          fi
+          default_branch_ref="refs/remotes/origin/$DEFAULT_BRANCH"
+          if ! git show-ref --verify --quiet "$default_branch_ref"; then
+            echo "Default branch ref is unavailable: $default_branch_ref" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "$default_branch_ref"; then
+            echo "Release tag commit must be reachable from the default branch" >&2
+            exit 1
+          fi
+      - name: Run unit tests
+        run: |
+          python3 -m unittest discover -s scripts/tests -p "test_*.py"
+          python3 -m unittest discover -s releases/tests -p "test_*.py"
+      - name: Validate Python and configuration syntax
+        run: |
+          python3 -m py_compile scripts/discover_examples.py releases/*.py
+          python3 -m json.tool config/ci.json >/dev/null
+          python3 -m json.tool config/factory-firmware.json >/dev/null
+      - name: Check the first-party inventory
+        run: |
+          python3 scripts/discover_examples.py --surface esp-idf --expect-examples 8 >/dev/null
+          python3 scripts/discover_examples.py --surface arduino --expect-examples 8 >/dev/null
+      - name: Validate checked-in factory firmware before release
+        run: python3 releases/validate_factory_firmware.py
+      - name: Validate the manual selector
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TARGET_SELECTOR: ${{ inputs.target || 'all' }}
+        run: |
+          python3 scripts/discover_examples.py --surface esp-idf --selector "$TARGET_SELECTOR" >/dev/null ||
+            python3 scripts/discover_examples.py --surface arduino --selector "$TARGET_SELECTOR" >/dev/null
+
+  discover-esp-idf:
+    name: Discover ESP-IDF examples
+    needs: validate-tooling
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+      count: ${{ steps.discover.outputs.count }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: discover
+        env:
+          TARGET_SELECTOR: ${{ inputs.target || 'all' }}
+        run: |
+          python3 scripts/discover_examples.py \
+            --surface esp-idf \
+            --selector "$TARGET_SELECTOR" \
+            --allow-empty-selector \
+            --expect-examples 8 \
+            --github-output "$GITHUB_OUTPUT"
+
+  build-esp-idf:
+    name: ESP-IDF ${{ matrix.idf }} / ${{ matrix.name }}
+    needs: discover-esp-idf
+    if: needs.discover-esp-idf.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    container: espressif/idf:${{ matrix.idf }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover-esp-idf.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build ${{ matrix.path }}
+        shell: bash
+        env:
+          EXAMPLE_PATH: ${{ matrix.path }}
+          EXAMPLE_SLUG: ${{ matrix.slug }}
+          FRAMEWORK_VERSION: ${{ matrix.idf }}
+          BUILD_TARGET: ${{ matrix.target }}
+        run: |
+          . "$IDF_PATH/export.sh"
+          build_dir="$GITHUB_WORKSPACE/.ci-build/esp-idf/$EXAMPLE_SLUG-$FRAMEWORK_VERSION"
+          idf.py --version
+          idf.py -C "$EXAMPLE_PATH" -B "$build_dir" set-target "$BUILD_TARGET" build
+      - name: Package and validate firmware
+        shell: bash
+        env:
+          EXAMPLE_PATH: ${{ matrix.path }}
+          EXAMPLE_SLUG: ${{ matrix.slug }}
+          FRAMEWORK_VERSION: ${{ matrix.idf }}
+          BUILD_TARGET: ${{ matrix.target }}
+        run: |
+          build_dir="$GITHUB_WORKSPACE/.ci-build/esp-idf/$EXAMPLE_SLUG-$FRAMEWORK_VERSION"
+          SOURCE_DATE_EPOCH="$(git -c safe.directory="$GITHUB_WORKSPACE" show -s --format=%ct "$GITHUB_SHA")"
+          export SOURCE_DATE_EPOCH
+          python3 releases/package_firmware.py \
+            --framework esp-idf \
+            --project "$EXAMPLE_PATH" \
+            --build-dir "$build_dir" \
+            --name "ESP32-C5-LCD-1.47-$EXAMPLE_SLUG-esp-idf-$FRAMEWORK_VERSION-$BUILD_TARGET" \
+            --framework-version "$FRAMEWORK_VERSION" \
+            --target "$BUILD_TARGET" \
+            --git-sha "$GITHUB_SHA" \
+            --output-dir release-artifacts
+          python3 releases/validate_firmware.py release-artifacts/*.zip
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: firmware-ESP32-C5-LCD-1.47-esp-idf-${{ matrix.slug }}-${{ matrix.idf }}
+          path: release-artifacts/*.zip
+          if-no-files-found: error
+
+  discover-arduino:
+    name: Discover Arduino sketches
+    needs: validate-tooling
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+      count: ${{ steps.discover.outputs.count }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: discover
+        env:
+          TARGET_SELECTOR: ${{ inputs.target || 'all' }}
+        run: |
+          python3 scripts/discover_examples.py \
+            --surface arduino \
+            --selector "$TARGET_SELECTOR" \
+            --allow-empty-selector \
+            --expect-examples 8 \
+            --github-output "$GITHUB_OUTPUT"
+
+  build-arduino:
+    name: Arduino ${{ matrix.core }} / ${{ matrix.name }}
+    needs: discover-arduino
+    if: needs.discover-arduino.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover-arduino.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2.0.0
+        with:
+          version: ${{ matrix.cli }}
+      - name: Install ESP32 Arduino core
+        env:
+          ARDUINO_CORE: ${{ matrix.core }}
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install "esp32:esp32@$ARDUINO_CORE"
+      - name: Compile ${{ matrix.path }}
+        shell: bash
+        env:
+          EXAMPLE_PATH: ${{ matrix.path }}
+          EXAMPLE_SLUG: ${{ matrix.slug }}
+          FRAMEWORK_VERSION: ${{ matrix.core }}
+          BOARD_FQBN: ${{ matrix.fqbn }}
+        run: |
+          build_dir="$GITHUB_WORKSPACE/.ci-build/arduino/$EXAMPLE_SLUG-$FRAMEWORK_VERSION"
+          arduino-cli compile \
+            --fqbn "$BOARD_FQBN" \
+            --libraries libraries \
+            --output-dir "$build_dir" \
+            "$EXAMPLE_PATH"
+      - name: Package and validate firmware
+        shell: bash
+        env:
+          EXAMPLE_PATH: ${{ matrix.path }}
+          EXAMPLE_SLUG: ${{ matrix.slug }}
+          FRAMEWORK_VERSION: ${{ matrix.core }}
+          BUILD_TARGET: ${{ matrix.target }}
+        run: |
+          build_dir="$GITHUB_WORKSPACE/.ci-build/arduino/$EXAMPLE_SLUG-$FRAMEWORK_VERSION"
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          export SOURCE_DATE_EPOCH
+          python3 releases/package_firmware.py \
+            --framework arduino \
+            --project "$EXAMPLE_PATH" \
+            --build-dir "$build_dir" \
+            --name "ESP32-C5-LCD-1.47-$EXAMPLE_SLUG-arduino-$FRAMEWORK_VERSION-$BUILD_TARGET" \
+            --framework-version "$FRAMEWORK_VERSION" \
+            --target "$BUILD_TARGET" \
+            --git-sha "$GITHUB_SHA" \
+            --output-dir release-artifacts
+          python3 releases/validate_firmware.py release-artifacts/*.zip
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: firmware-ESP32-C5-LCD-1.47-arduino-${{ matrix.slug }}-${{ matrix.core }}
+          path: release-artifacts/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') &&
+      needs.build-esp-idf.result == 'success' &&
+      needs.build-arduino.result == 'success'
+    needs:
+      - build-esp-idf
+      - build-arduino
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download firmware artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: firmware-*
+          path: release-artifacts
+          merge-multiple: true
+      - name: Validate complete release matrix
+        run: >-
+          python3 releases/validate_release_artifacts.py release-artifacts
+          --git-sha "$GITHUB_SHA"
+      - name: Prepare draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"
+            if [ "$is_draft" != "true" ]; then
+              echo "Refusing to overwrite an existing published Release" >&2
+              exit 1
+            fi
+            gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --draft
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "$GITHUB_REF_NAME"
+          release-artifacts/*.zip
+          --repo "$GITHUB_REPOSITORY"
+          --clobber
+      - name: Verify draft asset inventory
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > uploaded-release.json
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          def sha256(path):
+              digest = hashlib.sha256()
+              with path.open("rb") as source:
+                  for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return f"sha256:{digest.hexdigest()}"
+
+          release = json.loads(Path("uploaded-release.json").read_text(encoding="utf-8"))
+          local_assets = {
+              path.name: sha256(path) for path in Path("release-artifacts").glob("*.zip")
+          }
+          remote_assets = {
+              asset["name"]: asset.get("digest") for asset in release.get("assets", [])
+          }
+          if local_assets != remote_assets:
+              raise SystemExit(
+                  "Release asset names or SHA-256 digests differ:\n"
+                  f"local={json.dumps(local_assets, sort_keys=True)}\n"
+                  f"remote={json.dumps(remote_assets, sort_keys=True)}"
+              )
+          if release.get("draft") is not True:
+              raise SystemExit("Release must remain a draft until verification completes")
+          if release.get("tag_name") != os.environ["RELEASE_TAG"]:
+              raise SystemExit("Release tag metadata does not match the workflow tag")
+          if release.get("name") != os.environ["RELEASE_TAG"]:
+              raise SystemExit("Release title does not match the workflow tag")
+          if release.get("prerelease") is not False:
+              raise SystemExit("Stable release workflow must not publish a prerelease")
+          if not str(release.get("body") or "").strip():
+              raise SystemExit("Generated release notes must not be empty")
+          PY
+      - name: Publish verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false

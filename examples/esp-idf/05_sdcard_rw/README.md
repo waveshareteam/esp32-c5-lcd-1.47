@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 
 This example starts the LCD, mounts the microSD card through SDSPI, writes a file, reads it back, and shows every step on the screen.
 
-```powershell
-idf.py set-target esp32c5
-idf.py build flash monitor
+```bash
+idf.py -C examples/esp-idf/05_sdcard_rw set-target esp32c5
+idf.py -C examples/esp-idf/05_sdcard_rw build flash monitor
 ```

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "ESP32-C5-LCD-1.47-Factory",
+  "board": "ESP32-C5-LCD-1.47",
+  "hardware_variant": "ESP32-C5",
+  "target": "esp32c5",
+  "image": "firmware/ESP32-C5-LCD-1.47-Test.bin",
+  "offset": "0x0",
+  "image_header_offset": "0x2000",
+  "size": 1388832,
+  "sha256": "6b6ef3729df2a442c94a897ac789fe9d3bcf0be72378a1138e92b5c713267724",
+  "sdcard_resources_included": false
+}
