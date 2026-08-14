@@ -328,8 +328,18 @@ jobs:
           RELEASE_DIGEST_RETRY_SECONDS: "5"
         run: |
           verified=false
+          release_id="$(
+            gh release view "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json databaseId \
+              --jq '.databaseId'
+          )"
+          if [[ ! "$release_id" =~ ^[0-9]+$ ]]; then
+            echo "Unable to resolve the draft GitHub Release ID" >&2
+            exit 1
+          fi
           for ((attempt = 1; attempt <= RELEASE_DIGEST_ATTEMPTS; attempt++)); do
-            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > uploaded-release.json
+            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" > uploaded-release.json
             if python3 releases/validate_github_release.py \
               uploaded-release.json \
               release-artifacts \
@@ -343,7 +353,7 @@ jobs:
               exit "$status"
             fi
             if [ "$attempt" -eq "$RELEASE_DIGEST_ATTEMPTS" ]; then
-              echo "GitHub digests are still pending; downloading assets for byte verification"
+              echo "GitHub asset metadata is still pending; downloading assets for byte verification"
               mkdir uploaded-release-assets
               gh release download "$GITHUB_REF_NAME" \
                 --repo "$GITHUB_REPOSITORY" \
@@ -357,7 +367,7 @@ jobs:
               verified=true
               break
             fi
-            echo "GitHub Release asset digests are pending; retrying ($attempt/$RELEASE_DIGEST_ATTEMPTS)"
+            echo "GitHub Release asset metadata is pending; retrying ($attempt/$RELEASE_DIGEST_ATTEMPTS)"
             sleep "$RELEASE_DIGEST_RETRY_SECONDS"
           done
           if [ "$verified" != "true" ]; then

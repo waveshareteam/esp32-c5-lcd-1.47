@@ -16,8 +16,8 @@ PENDING_EXIT_CODE = 75
 SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
-class PendingAssetDigests(ValueError):
-    """Raised while GitHub is still computing uploaded asset digests."""
+class PendingReleaseAssets(ValueError):
+    """Raised while GitHub is still indexing uploaded release assets."""
 
 
 def sha256(path: Path) -> str:
@@ -102,17 +102,16 @@ def validate_release(
 
     expected_names = set(expected)
     remote_names = set(remote)
-    if expected_names != remote_names:
-        missing = sorted(expected_names - remote_names)
-        unexpected = sorted(remote_names - expected_names)
+    missing = sorted(expected_names - remote_names)
+    unexpected = sorted(remote_names - expected_names)
+    if unexpected:
         raise ValueError(
-            "GitHub Release asset names differ: "
-            f"missing={json.dumps(missing)}, unexpected={json.dumps(unexpected)}"
+            "GitHub Release has unexpected assets: " + json.dumps(unexpected)
         )
 
     wrong_sizes = {
         name: {"local": expected[name][0], "remote": remote[name][0]}
-        for name in sorted(expected)
+        for name in sorted(remote)
         if expected[name][0] != remote[name][0]
     }
     if wrong_sizes:
@@ -129,17 +128,22 @@ def validate_release(
 
     wrong_digests = {
         name: {"local": expected[name][1], "remote": remote[name][1]}
-        for name in sorted(expected)
+        for name in sorted(remote)
         if remote[name][1] is not None and expected[name][1] != remote[name][1]
     }
     if wrong_digests:
         raise ValueError(f"GitHub Release asset digests differ: {json.dumps(wrong_digests)}")
 
     pending = sorted(name for name, (_, digest) in remote.items() if digest is None)
-    if pending:
+    if missing or pending:
         if downloaded_dir is None:
-            raise PendingAssetDigests(
-                "GitHub has not computed SHA-256 digests for: " + ", ".join(pending)
+            details = []
+            if missing:
+                details.append("assets not listed yet: " + ", ".join(missing))
+            if pending:
+                details.append("SHA-256 digests pending: " + ", ".join(pending))
+            raise PendingReleaseAssets(
+                "GitHub is still indexing the draft Release (" + "; ".join(details) + ")"
             )
         validate_downloaded_assets(expected, downloaded_dir)
     return len(expected)
@@ -157,7 +161,7 @@ def main() -> int:
         release = json.loads(Path(args.release_json).read_text(encoding="utf-8"))
         downloaded_dir = Path(args.downloaded_assets) if args.downloaded_assets else None
         count = validate_release(release, Path(args.artifact_dir), args.tag, downloaded_dir)
-    except PendingAssetDigests as exc:
+    except PendingReleaseAssets as exc:
         print(f"pending: {exc}", file=sys.stderr)
         return PENDING_EXIT_CODE
     except (OSError, ValueError) as exc:

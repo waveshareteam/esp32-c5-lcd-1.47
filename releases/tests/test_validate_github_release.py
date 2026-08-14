@@ -50,8 +50,23 @@ class ValidateGithubReleaseTests(unittest.TestCase):
 
     def test_reports_pending_digest(self) -> None:
         self.release["assets"][0]["digest"] = None
-        with self.assertRaisesRegex(MODULE.PendingAssetDigests, "alpha.zip"):
+        with self.assertRaisesRegex(MODULE.PendingReleaseAssets, "alpha.zip"):
             MODULE.validate_release(self.release, self.artifacts, self.tag)
+
+    def test_reports_missing_asset_as_pending(self) -> None:
+        self.release["assets"].pop()
+        with self.assertRaisesRegex(MODULE.PendingReleaseAssets, "not listed yet"):
+            MODULE.validate_release(self.release, self.artifacts, self.tag)
+
+    def test_accepts_downloaded_assets_when_remote_listing_is_pending(self) -> None:
+        self.release["assets"].pop()
+        downloaded = self.root / "downloaded"
+        downloaded.mkdir()
+        for source in self.artifacts.glob("*.zip"):
+            (downloaded / source.name).write_bytes(source.read_bytes())
+        self.assertEqual(
+            MODULE.validate_release(self.release, self.artifacts, self.tag, downloaded), 2
+        )
 
     def test_accepts_downloaded_assets_when_digest_is_pending(self) -> None:
         self.release["assets"][0]["digest"] = None
@@ -89,12 +104,12 @@ class ValidateGithubReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "sizes differ"):
             MODULE.validate_release(self.release, self.artifacts, self.tag)
 
-    def test_rejects_missing_or_extra_asset(self) -> None:
+    def test_rejects_extra_asset(self) -> None:
         self.release["assets"].pop()
         self.release["assets"].append(
             {"name": "extra.zip", "size": 1, "digest": "sha256:" + "0" * 64}
         )
-        with self.assertRaisesRegex(ValueError, "asset names differ"):
+        with self.assertRaisesRegex(ValueError, "unexpected assets"):
             MODULE.validate_release(self.release, self.artifacts, self.tag)
 
     def test_rejects_duplicate_asset(self) -> None:
