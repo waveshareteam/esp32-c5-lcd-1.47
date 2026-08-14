@@ -235,7 +235,7 @@ jobs:
           arduino-cli compile \
             --fqbn "$BOARD_FQBN" \
             --libraries libraries \
-            --output-dir "$build_dir" \
+            --build-path "$build_dir" \
             "$EXAMPLE_PATH"
       - name: Package and validate firmware
         shell: bash

@@ -49,10 +49,12 @@ creates the combined image.
 ## Package An Arduino Build
 
 Compile with the exact FQBN from `config/ci.json`, pass
-`--libraries libraries`, and select a stable directory with `--output-dir`. Then run
-the packager with `--framework arduino`. It prefers Arduino's merged image; the
-fallback requires exactly one bootloader, partition table, and application
-binary before constructing a complete flash image.
+`--libraries libraries`, and select a stable directory with `--build-path` so
+the generated `boot_app0.bin` remains available. Then run the packager with
+`--framework arduino`. It prefers a matching bootloader, partition table, boot
+application, and application component set and constructs a compact complete
+image that ends at the application segment. Arduino's merged image is retained
+only as a compatibility fallback when those components are not available.
 
 Set `SOURCE_DATE_EPOCH` to the source commit's Unix timestamp when reproducible
 ZIP bytes are required. The package name includes the first seven characters of

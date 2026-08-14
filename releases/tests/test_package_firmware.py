@@ -21,6 +21,25 @@ def esp_image(chip_id: int = 23, size: int = 32) -> bytes:
     return bytes(image)
 
 
+def padded_merged_image(
+    size: int = 4 * 1024 * 1024,
+    application: bytes = b"A" * 64,
+    bootloader: bytes | None = None,
+    partition_table: bytes = b"P" * 32,
+    boot_app: bytes = b"O" * 32,
+) -> bytes:
+    image = bytearray(b"\xff" * size)
+    bootloader = bootloader or esp_image()
+    for offset, component in (
+        (0x2000, bootloader),
+        (0x8000, partition_table),
+        (0xE000, boot_app),
+        (0x10000, application),
+    ):
+        image[offset : offset + len(component)] = component
+    return bytes(image)
+
+
 class PackageFirmwareTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -150,6 +169,7 @@ class PackageFirmwareTests(unittest.TestCase):
         (build / "demo.ino.partitions.bin").write_bytes(b"P" * 32)
         (build / "boot_app0.bin").write_bytes(b"O" * 32)
         (build / "demo.ino.bin").write_bytes(b"A" * 64)
+        (build / "demo.ino.merged.bin").write_bytes(padded_merged_image())
 
         self.run_script(
             PACKAGE_SCRIPT,
@@ -179,6 +199,120 @@ class PackageFirmwareTests(unittest.TestCase):
                 {"0x2000", "0x8000", "0xe000", "0x10000"},
             )
             self.assertEqual(manifest["image_header_offset"], "0x2000")
+            self.assertFalse(
+                any(record["source"].endswith(".merged.bin") for record in manifest["segments"])
+            )
+            self.assertEqual(len(package.read(f"arduino-demo/{manifest['combined_bin']}")), 0x10000 + 64)
+            self.assertFalse(any(info.filename.endswith(".merged.bin") for info in package.infolist()))
+
+    def test_arduino_components_without_boot_app_use_merged_fallback(self) -> None:
+        project = self.repo / "examples/arduino/demo"
+        project.mkdir(parents=True)
+        (project / "demo.ino").touch()
+        build = self.repo / "arduino-build"
+        build.mkdir()
+        (build / "demo.ino.bootloader.bin").write_bytes(esp_image())
+        (build / "demo.ino.partitions.bin").write_bytes(b"P" * 32)
+        (build / "demo.ino.bin").write_bytes(b"A" * 64)
+        (build / "demo.ino.merged.bin").write_bytes(padded_merged_image())
+
+        self.run_script(
+            PACKAGE_SCRIPT,
+            "--repo",
+            str(self.repo),
+            "--framework",
+            "arduino",
+            "--project",
+            "examples/arduino/demo",
+            "--build-dir",
+            "arduino-build",
+            "--name",
+            "arduino-demo",
+            "--output-dir",
+            "out",
+            "--framework-version",
+            "3.3.11",
+        )
+
+        archive = self.repo / "out/arduino-demo.zip"
+        self.run_script(VALIDATE_SCRIPT, str(archive))
+        with zipfile.ZipFile(archive) as package:
+            manifest = json.loads(package.read("arduino-demo/manifest.json"))
+            self.assertEqual(len(manifest["segments"]), 1)
+            self.assertEqual(manifest["segments"][0]["offset"], "0x0")
+            self.assertTrue(manifest["segments"][0]["source"].endswith(".merged.bin"))
+            self.assertEqual(
+                len(package.read(f"arduino-demo/{manifest['combined_bin']}")),
+                4 * 1024 * 1024,
+            )
+
+    def test_arduino_components_must_match_the_merged_binary(self) -> None:
+        project = self.repo / "examples/arduino/demo"
+        project.mkdir(parents=True)
+        (project / "demo.ino").touch()
+        build = self.repo / "arduino-build"
+        build.mkdir()
+        (build / "demo.ino.bootloader.bin").write_bytes(esp_image())
+        (build / "demo.ino.partitions.bin").write_bytes(b"P" * 32)
+        (build / "boot_app0.bin").write_bytes(b"O" * 32)
+        (build / "demo.ino.bin").write_bytes(b"A" * 64)
+        (build / "demo.ino.merged.bin").write_bytes(
+            padded_merged_image(application=b"different application")
+        )
+
+        result = self.run_script(
+            PACKAGE_SCRIPT,
+            "--repo",
+            str(self.repo),
+            "--framework",
+            "arduino",
+            "--project",
+            "examples/arduino/demo",
+            "--build-dir",
+            "arduino-build",
+            "--framework-version",
+            "3.3.11",
+            expect_success=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("differs from exported component demo.ino.bin", result.stderr)
+
+    def test_arduino_merged_binary_remains_a_compatibility_fallback(self) -> None:
+        project = self.repo / "examples/arduino/demo"
+        project.mkdir(parents=True)
+        (project / "demo.ino").touch()
+        build = self.repo / "arduino-build"
+        build.mkdir()
+        merged = b"\xff" * 0x2000 + esp_image() + b"A" * 64
+        (build / "demo.ino.merged.bin").write_bytes(merged)
+
+        self.run_script(
+            PACKAGE_SCRIPT,
+            "--repo",
+            str(self.repo),
+            "--framework",
+            "arduino",
+            "--project",
+            "examples/arduino/demo",
+            "--build-dir",
+            "arduino-build",
+            "--name",
+            "arduino-demo",
+            "--output-dir",
+            "out",
+            "--framework-version",
+            "3.3.11",
+        )
+
+        archive = self.repo / "out/arduino-demo.zip"
+        self.run_script(VALIDATE_SCRIPT, str(archive))
+        with zipfile.ZipFile(archive) as package:
+            manifest = json.loads(package.read("arduino-demo/manifest.json"))
+            self.assertEqual(len(manifest["segments"]), 1)
+            self.assertEqual(manifest["segments"][0]["offset"], "0x0")
+            self.assertTrue(manifest["segments"][0]["source"].endswith(".merged.bin"))
+            self.assertEqual(len(package.read(f"arduino-demo/{manifest['combined_bin']}")), len(merged))
 
     def test_mismatched_build_target_is_rejected(self) -> None:
         self.create_esp_idf_build()
@@ -248,7 +382,67 @@ class PackageFirmwareTests(unittest.TestCase):
         )
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("one Arduino bootloader binary", result.stderr)
+        self.assertIn("missing demo.ino.bootloader.bin", result.stderr)
+
+    def test_arduino_components_from_different_sketches_are_not_mixed(self) -> None:
+        project = self.repo / "examples/arduino/demo"
+        project.mkdir(parents=True)
+        (project / "demo.ino").touch()
+        build = self.repo / "arduino-build"
+        build.mkdir()
+        (build / "demo.ino.bin").write_bytes(b"A" * 64)
+        (build / "demo.ino.partitions.bin").write_bytes(b"P" * 32)
+        (build / "other.ino.bootloader.bin").write_bytes(esp_image())
+        (build / "filesystem.bin").write_bytes(b"F" * 64)
+
+        result = self.run_script(
+            PACKAGE_SCRIPT,
+            "--repo",
+            str(self.repo),
+            "--framework",
+            "arduino",
+            "--project",
+            "examples/arduino/demo",
+            "--build-dir",
+            "arduino-build",
+            "--framework-version",
+            "3.3.11",
+            expect_success=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing demo.ino.bootloader.bin", result.stderr)
+
+    def test_arduino_multiple_application_binaries_are_rejected(self) -> None:
+        project = self.repo / "examples/arduino/demo"
+        project.mkdir(parents=True)
+        (project / "demo.ino").touch()
+        build = self.repo / "arduino-build"
+        build.mkdir()
+        (build / "demo.ino.bin").write_bytes(b"A" * 64)
+        (build / "demo.ino.bootloader.bin").write_bytes(esp_image())
+        (build / "demo.ino.partitions.bin").write_bytes(b"P" * 32)
+        (build / "boot_app0.bin").write_bytes(b"O" * 32)
+        (build / "stale.ino.bin").write_bytes(b"S" * 64)
+        (build / "demo.ino.merged.bin").write_bytes(padded_merged_image())
+
+        result = self.run_script(
+            PACKAGE_SCRIPT,
+            "--repo",
+            str(self.repo),
+            "--framework",
+            "arduino",
+            "--project",
+            "examples/arduino/demo",
+            "--build-dir",
+            "arduino-build",
+            "--framework-version",
+            "3.3.11",
+            expect_success=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("found 2", result.stderr)
 
     def test_same_inputs_produce_identical_archives(self) -> None:
         self.create_esp_idf_build()

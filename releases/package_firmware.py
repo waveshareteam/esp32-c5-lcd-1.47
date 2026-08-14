@@ -238,6 +238,32 @@ def esp_idf_segments(build_dir: Path, firmware_dir: Path, package_dir: Path) -> 
     return entries, data
 
 
+def validate_arduino_components_against_merged(
+    merged: Path,
+    selected: list[tuple[str, Path]],
+) -> None:
+    position = 0
+    with merged.open("rb") as merged_image:
+        for offset_value, component in sorted(
+            selected, key=lambda item: parse_offset(item[0])
+        ):
+            offset = parse_offset(offset_value)
+            if offset < position:
+                raise ValueError(f"Arduino component {component.name} overlaps a previous segment")
+            padding_size = offset - position
+            padding = merged_image.read(padding_size)
+            if padding != b"\xff" * padding_size:
+                raise ValueError(
+                    f"Arduino merged binary differs from compact layout before {component.name}"
+                )
+            component_data = component.read_bytes()
+            if merged_image.read(len(component_data)) != component_data:
+                raise ValueError(
+                    f"Arduino merged binary differs from exported component {component.name}"
+                )
+            position = offset + len(component_data)
+
+
 def arduino_segments(
     build_dir: Path,
     firmware_dir: Path,
@@ -251,46 +277,81 @@ def arduino_segments(
     merged = [path for path in binaries if path.name.endswith(".merged.bin")]
     if len(merged) > 1:
         raise ValueError(f"expected at most one Arduino merged binary, found {len(merged)}")
+
+    applications = [path for path in binaries if path.name.endswith(".ino.bin")]
+    if len(applications) > 1:
+        raise ValueError(
+            f"expected at most one Arduino application binary, found {len(applications)}"
+        )
+    component_sets: list[tuple[Path, Path, Path, Path]] = []
+    for application in applications:
+        bootloader = application.with_name(f"{application.stem}.bootloader.bin")
+        partition_table = application.with_name(f"{application.stem}.partitions.bin")
+        boot_app_candidates = [
+            path
+            for path in (
+                application.parent / "boot_app0.bin",
+                application.with_name(f"{application.stem}.boot_app0.bin"),
+            )
+            if path.is_file()
+        ]
+        if len(boot_app_candidates) > 1:
+            raise ValueError(
+                f"expected at most one Arduino boot_app0 binary, found {len(boot_app_candidates)}"
+            )
+        if bootloader.is_file() and partition_table.is_file() and boot_app_candidates:
+            component_sets.append(
+                (application, bootloader, partition_table, boot_app_candidates[0])
+            )
+
+    if len(component_sets) > 1:
+        raise ValueError(
+            f"expected at most one complete Arduino component set, found {len(component_sets)}"
+        )
+    if component_sets:
+        application, bootloader, partition_table, boot_app = component_sets[0]
+        selected = [
+            (bootloader_offset, bootloader),
+            ("0x8000", partition_table),
+            ("0xe000", boot_app),
+            ("0x10000", application),
+        ]
+        if merged:
+            validate_arduino_components_against_merged(merged[0], selected)
+        return [
+            copy_segment(path, firmware_dir, package_dir, offset, path.name)
+            for offset, path in sorted(selected, key=lambda item: parse_offset(item[0]))
+        ]
+
     if merged:
         return [copy_segment(merged[0], firmware_dir, package_dir, "0x0", merged[0].name)]
 
-    selected: list[tuple[str, Path]] = []
-    bootloaders: list[Path] = []
-    partition_tables: list[Path] = []
-    application_candidates: list[Path] = []
-    for path in binaries:
-        name = path.name
-        if name.endswith(".bootloader.bin"):
-            bootloaders.append(path)
-        elif name.endswith(".partitions.bin"):
-            partition_tables.append(path)
-        elif name == "boot_app0.bin" or name.endswith(".boot_app0.bin"):
-            selected.append(("0xe000", path))
-        elif not any(token in name for token in (".bootloader.", ".partitions.", ".merged.")):
-            application_candidates.append(path)
-    if len(application_candidates) != 1:
+    if len(applications) == 1:
+        application = applications[0]
+        required_components = [
+            path.name
+            for path in (
+                application.with_name(f"{application.stem}.bootloader.bin"),
+                application.with_name(f"{application.stem}.partitions.bin"),
+            )
+            if not path.is_file()
+        ]
+        if not any(
+            path.is_file()
+            for path in (
+                application.parent / "boot_app0.bin",
+                application.with_name(f"{application.stem}.boot_app0.bin"),
+            )
+        ):
+            required_components.append("boot_app0.bin")
         raise ValueError(
-            f"expected one Arduino application binary, found {len(application_candidates)} in {build_dir}"
+            f"incomplete Arduino component set for {application.name}; "
+            f"missing {', '.join(required_components)}"
         )
-    if len(bootloaders) != 1:
-        raise ValueError(
-            f"expected one Arduino bootloader binary, found {len(bootloaders)} in {build_dir}"
-        )
-    if len(partition_tables) != 1:
-        raise ValueError(
-            f"expected one Arduino partition-table binary, found {len(partition_tables)} in {build_dir}"
-        )
-    selected.extend(
-        (
-            (bootloader_offset, bootloaders[0]),
-            ("0x8000", partition_tables[0]),
-        )
+    raise ValueError(
+        "expected one complete Arduino component set or one merged binary; "
+        f"found {len(applications)} application binaries in {build_dir}"
     )
-    selected.append(("0x10000", application_candidates[0]))
-    return [
-        copy_segment(path, firmware_dir, package_dir, offset, path.name)
-        for offset, path in sorted(selected, key=lambda item: parse_offset(item[0]))
-    ]
 
 
 def shell_command(parts: Iterable[str]) -> str:

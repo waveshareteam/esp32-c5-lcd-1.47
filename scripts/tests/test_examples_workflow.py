@@ -47,7 +47,8 @@ class ExamplesWorkflowTests(unittest.TestCase):
         self.assertIn("python3 releases/validate_factory_firmware.py", self.workflow)
 
     def test_arduino_outputs_stay_in_the_ci_build_directory(self) -> None:
-        self.assertIn('--output-dir "$build_dir"', self.workflow)
+        self.assertIn('--build-path "$build_dir"', self.workflow)
+        self.assertNotIn('--output-dir "$build_dir"', self.workflow)
         self.assertNotIn("--export-binaries", self.workflow)
 
     def test_release_is_draft_until_assets_are_verified(self) -> None:

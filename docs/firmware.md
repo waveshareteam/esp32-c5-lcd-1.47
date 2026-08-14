@@ -23,6 +23,14 @@ The combined image is flashed at offset `0x0`. On ESP32-C5 it normally contains
 erased-flash padding before the first Espressif image header at `0x2000`; that
 header offset is recorded and validated in `manifest.json`.
 
+For Arduino builds, the packager uses the matching exported bootloader,
+partition table, boot application, and application binaries. CI keeps the full
+Arduino build directory because `--output-dir` alone does not export
+`boot_app0.bin`. The packager omits Arduino CLI's flash-capacity-sized merged
+image only when all four components are available, so the generated combined
+image ends at the last required segment. A merged image remains supported as a
+compatibility fallback.
+
 After extracting an archive, install esptool and use the included helper:
 
 ```text
