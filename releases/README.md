@@ -19,14 +19,17 @@ bin/*.bin
 
 The helpers write one combined image at flash offset `0x0`. For ESP32-C5, the
 combined image contains erased-flash padding before the bootloader header at
-`0x2000`. Install esptool before using a helper on Linux or macOS:
+`0x2000`. Install esptool with an available Python 3 launcher:
 
 ```bash
+python -m pip install esptool
 python3 -m pip install esptool
+py -3 -m pip install esptool
 ./flash.sh /dev/ttyUSB0
 ```
 
-On Windows, run `py -3 -m pip install esptool` and then `flash.bat COMx`.
+Only one install command is needed. `flash.sh` detects `python` or `python3`;
+`flash.bat` detects `python` or `py -3`. On Windows, run `flash.bat COMx`.
 
 ## Package An ESP-IDF Build
 
@@ -49,10 +52,12 @@ creates the combined image.
 ## Package An Arduino Build
 
 Compile with the exact FQBN from `config/ci.json`, pass
-`--libraries libraries`, and select a stable directory with `--output-dir`. Then run
-the packager with `--framework arduino`. It prefers Arduino's merged image; the
-fallback requires exactly one bootloader, partition table, and application
-binary before constructing a complete flash image.
+`--libraries libraries`, and select a stable directory with `--build-path` so
+the generated `boot_app0.bin` remains available. Then run the packager with
+`--framework arduino`. It prefers a matching bootloader, partition table, boot
+application, and application component set and constructs a compact complete
+image that ends at the application segment. Arduino's merged image is retained
+only as a compatibility fallback when those components are not available.
 
 Set `SOURCE_DATE_EPOCH` to the source commit's Unix timestamp when reproducible
 ZIP bytes are required. The package name includes the first seven characters of

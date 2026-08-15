@@ -134,6 +134,23 @@ class ValidateFirmwareTests(unittest.TestCase):
     def test_valid_fixture_is_accepted(self) -> None:
         validate_firmware.validate_zip(self.archive, self.board_contract)
 
+    def test_legacy_python3_flash_helpers_remain_supported(self) -> None:
+        manifest = {
+            "flash_command": (
+                "python3 -m esptool --chip esp32c5 --port <PORT> --baud 460800 "
+                "--before default-reset --after hard-reset write-flash 0x0 bin/demo.bin"
+            ),
+            "target": "esp32c5",
+            "baud": "460800",
+            "combined_bin": "bin/demo.bin",
+        }
+
+        helpers = validate_firmware.expected_flash_helpers(manifest)
+
+        self.assertIn(b"'python3' '-m' 'esptool'", helpers["flash.sh"])
+        self.assertIn(b'"py" "-3" "-m" "esptool"', helpers["flash.bat"])
+        self.assertEqual(helpers["flash_args.txt"], (manifest["flash_command"] + "\n").encode())
+
     def test_rejects_tampered_combined_image_even_with_updated_digest(self) -> None:
         def mutate(members: dict[str, bytes]) -> None:
             manifest_name, manifest = self.manifest_entry(members)
@@ -155,6 +172,28 @@ class ValidateFirmwareTests(unittest.TestCase):
         self.rewrite_archive(mutate)
 
         with self.assertRaisesRegex(ValueError, "does not contain segment"):
+            validate_firmware.validate_zip(self.archive, self.board_contract)
+
+    def test_rejects_combined_image_padded_beyond_the_last_segment(self) -> None:
+        def mutate(members: dict[str, bytes]) -> None:
+            manifest_name, manifest = self.manifest_entry(members)
+            root = manifest_name.split("/", 1)[0]
+            combined_relative = manifest["combined_bin"]
+            combined_name = f"{root}/{combined_relative}"
+            combined = members[combined_name] + b"\xff" * 4096
+            members[combined_name] = combined
+            digest = hashlib.sha256(combined).hexdigest()
+            combined_record = next(
+                record for record in manifest["files"] if record["file"] == combined_relative
+            )
+            combined_record["size"] = len(combined)
+            combined_record["sha256"] = digest
+            members[manifest_name] = json.dumps(manifest).encode("utf-8")
+            self.replace_checksum(members, root, combined_relative, digest)
+
+        self.rewrite_archive(mutate)
+
+        with self.assertRaisesRegex(ValueError, "does not match segment layout"):
             validate_firmware.validate_zip(self.archive, self.board_contract)
 
     def test_rejects_tampered_board_identity(self) -> None:
