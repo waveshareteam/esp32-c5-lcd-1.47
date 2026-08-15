@@ -26,7 +26,7 @@ class DiscoverExamplesTests(unittest.TestCase):
                     "arduino": {
                         "cli": "1.5.1",
                         "core": "3.3.11",
-                        "fqbn": "esp32:esp32:esp32c5:FlashSize=4M",
+                        "fqbn": "esp32:esp32:esp32c5:FlashSize=4M,CDCOnBoot=cdc",
                     },
                 }
             ),
@@ -82,6 +82,7 @@ class DiscoverExamplesTests(unittest.TestCase):
         self.assertEqual(matrix["include"][0]["cli"], "1.5.1")
         self.assertEqual(matrix["include"][0]["target"], "esp32c5")
         self.assertIn("FlashSize=4M", matrix["include"][0]["fqbn"])
+        self.assertIn("CDCOnBoot=cdc", matrix["include"][0]["fqbn"])
 
     def test_selector_matches_name_or_complete_path(self) -> None:
         for name in ("01_first", "02_second"):

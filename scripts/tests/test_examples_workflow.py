@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -9,11 +10,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github/workflows/examples.yml"
 WORKFLOWS_DIR = REPO_ROOT / ".github/workflows"
 RELEASE_VALIDATOR = REPO_ROOT / "releases/validate_github_release.py"
+CI_CONFIG = REPO_ROOT / "config/ci.json"
 
 
 class ExamplesWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.config = json.loads(CI_CONFIG.read_text(encoding="utf-8"))
         self.all_workflows = "\n".join(
             path.read_text(encoding="utf-8") for path in sorted(WORKFLOWS_DIR.glob("*.yml"))
         )
@@ -50,6 +53,17 @@ class ExamplesWorkflowTests(unittest.TestCase):
         self.assertIn('--build-path "$build_dir"', self.workflow)
         self.assertNotIn('--output-dir "$build_dir"', self.workflow)
         self.assertNotIn("--export-binaries", self.workflow)
+
+    def test_arduino_release_build_enables_usb_cdc_on_boot(self) -> None:
+        fqbn = self.config["arduino"]["fqbn"]
+        package, architecture, board, raw_options = fqbn.split(":", 3)
+        options = dict(option.split("=", 1) for option in raw_options.split(","))
+
+        self.assertEqual((package, architecture, board), ("esp32", "esp32", "esp32c5"))
+        self.assertEqual(options["CDCOnBoot"], "cdc")
+        self.assertIn("--show-properties=expanded", self.workflow)
+        self.assertIn("build.cdc_on_boot=1", self.workflow)
+        self.assertIn("-DARDUINO_USB_CDC_ON_BOOT=1", self.workflow)
 
     def test_release_is_draft_until_assets_are_verified(self) -> None:
         release = self.workflow.split("  release:\n", 1)[1]

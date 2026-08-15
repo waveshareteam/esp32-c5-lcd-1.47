@@ -232,6 +232,23 @@ jobs:
           BOARD_FQBN: ${{ matrix.fqbn }}
         run: |
           build_dir="$GITHUB_WORKSPACE/.ci-build/arduino/$EXAMPLE_SLUG-$FRAMEWORK_VERSION"
+          build_properties="$(
+            arduino-cli compile \
+              --fqbn "$BOARD_FQBN" \
+              --libraries libraries \
+              --build-path "$build_dir" \
+              --show-properties=expanded \
+              "$EXAMPLE_PATH"
+          )"
+          if ! grep -qx 'build.cdc_on_boot=1' <<<"$build_properties"; then
+            echo "::error::Configured Arduino board does not enable USB CDC on boot" >&2
+            exit 1
+          fi
+          if ! grep -Eq '(^|[[:space:]])-DARDUINO_USB_CDC_ON_BOOT=1([[:space:]]|$)' \
+            <<<"$build_properties"; then
+            echo "::error::Arduino build flags do not enable USB CDC on boot" >&2
+            exit 1
+          fi
           arduino-cli compile \
             --fqbn "$BOARD_FQBN" \
             --libraries libraries \
