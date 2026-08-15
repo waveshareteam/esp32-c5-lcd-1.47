@@ -22,6 +22,7 @@ from pathlib import Path, PurePosixPath
 
 DEFAULT_WORKFLOW = "examples.yml"
 DEFAULT_OUTPUT = Path(__file__).resolve().parent / "downloads"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 API_ROOT = "https://api.github.com"
 USER_AGENT = "esp32-c5-lcd-1.47-artifacts"
 
@@ -41,32 +42,69 @@ def run_text(command: list[str]) -> str | None:
 
 
 def parse_github_repo(value: str) -> str | None:
-    value = value.strip().removesuffix(".git").rstrip("/")
-    if value.startswith("git@github.com:"):
-        candidate = value.removeprefix("git@github.com:")
-    elif value.startswith(("https://github.com/", "http://github.com/", "ssh://git@github.com/")):
-        candidate = value.split("github.com/", 1)[1]
-    elif re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value):
+    value = value.strip().rstrip("/")
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?", value):
         candidate = value
     else:
-        return None
+        scp = re.fullmatch(r"(?:[^/@:\s]+@)?github\.com:(.+)", value, re.IGNORECASE)
+        if scp:
+            candidate = scp.group(1)
+        else:
+            parsed = urllib.parse.urlsplit(value)
+            if parsed.hostname is None or parsed.hostname.lower() != "github.com":
+                return None
+            if parsed.scheme.lower() not in ("git", "http", "https", "ssh"):
+                return None
+            candidate = parsed.path.lstrip("/")
+
+    candidate = candidate.removesuffix(".git").rstrip("/")
     parts = candidate.split("/")
-    return "/".join(parts[:2]) if len(parts) >= 2 else None
+    if len(parts) != 2:
+        return None
+    if any(
+        part in ("", ".", "..") or not re.fullmatch(r"[A-Za-z0-9_.-]+", part)
+        for part in parts
+    ):
+        return None
+    return "/".join(parts)
 
 
 def default_repo() -> str | None:
     environment = os.environ.get("GITHUB_REPOSITORY")
-    parsed = parse_github_repo(environment) if environment else None
-    if parsed:
+    if environment is not None:
+        parsed = parse_github_repo(environment)
+        if not parsed:
+            raise RuntimeError(
+                "GITHUB_REPOSITORY is invalid; expected OWNER/REPOSITORY."
+            )
         return parsed
-    remote = run_text(["git", "config", "--get", "remote.origin.url"])
-    parsed = parse_github_repo(remote) if remote else None
-    return parsed
+
+    git = ["git", "-C", str(REPO_ROOT)]
+    remotes = run_text([*git, "remote"])
+    if not remotes:
+        return None
+    remote_names = [name.strip() for name in remotes.splitlines() if name.strip()]
+    repositories: set[str] = set()
+    for name in remote_names:
+        urls = run_text([*git, "remote", "get-url", "--all", name])
+        for url in urls.splitlines() if urls else ():
+            parsed = parse_github_repo(url)
+            if parsed:
+                repositories.add(parsed)
+    if len(repositories) > 1:
+        raise RuntimeError(
+            "multiple GitHub repositories found in Git remotes; "
+            "pass --repo OWNER/REPOSITORY."
+        )
+    return next(iter(repositories), None)
 
 
 def token() -> str | None:
-    environment = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    return environment.strip() if environment else run_text(["gh", "auth", "token"])
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        environment = os.environ.get(name)
+        if environment and environment.strip():
+            return environment.strip()
+    return run_text(["gh", "auth", "token"])
 
 
 def request(url: str, auth_token: str | None) -> urllib.request.Request:
@@ -203,7 +241,7 @@ def artifacts(repo: str, run_id: int, auth_token: str | None) -> list[dict]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", default=default_repo())
+    parser.add_argument("--repo")
     parser.add_argument("--workflow", default=DEFAULT_WORKFLOW)
     parser.add_argument("--run-id", type=int)
     parser.add_argument("--branch")
@@ -214,9 +252,8 @@ def main() -> int:
     parser.add_argument("--clean", action="store_true")
     args = parser.parse_args()
 
-    auth_token = token()
     try:
-        repository = parse_github_repo(args.repo or "")
+        repository = parse_github_repo(args.repo) if args.repo is not None else default_repo()
         if not repository:
             raise RuntimeError(
                 "GitHub repository is unknown; pass --repo OWNER/REPOSITORY or set GITHUB_REPOSITORY."
@@ -226,6 +263,7 @@ def main() -> int:
             raise RuntimeError(
                 "--branch is required when --run-id is omitted; choose the trusted branch explicitly."
             )
+        auth_token = token()
         if args.run_id:
             run_id = args.run_id
             run_url = f"https://github.com/{args.repo}/actions/runs/{run_id}"

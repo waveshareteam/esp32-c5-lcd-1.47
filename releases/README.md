@@ -58,6 +58,9 @@ the generated `boot_app0.bin` remains available. Then run the packager with
 application, and application component set and constructs a compact complete
 image that ends at the application segment. Arduino's merged image is retained
 only as a compatibility fallback when those components are not available.
+The configured ESP32-C5 FQBN enables USB CDC on boot, and CI verifies the
+expanded Arduino Core property and compiler definition before building release
+firmware.
 
 Set `SOURCE_DATE_EPOCH` to the source commit's Unix timestamp when reproducible
 ZIP bytes are required. The package name includes the first seven characters of
@@ -88,17 +91,18 @@ factory-demo microSD resources.
 
 ## Download CI Artifacts
 
-The repository currently cannot infer a GitHub owner/repository from a
-non-GitHub Git remote. Pass the GitHub destination explicitly:
+When the repository has a GitHub remote, the downloader infers its
+owner/repository even if `origin` points to GitLab:
 
 ```bash
 python3 releases/download_artifacts.py \
-  --repo OWNER/REPOSITORY \
   --branch main \
   --clean
 ```
 
-`GITHUB_REPOSITORY` or a GitHub `origin` remote can supply the same default.
+Use `--repo OWNER/REPOSITORY` when running outside this checkout, when no
+GitHub remote is configured, or when remotes point to different GitHub
+repositories. `GITHUB_REPOSITORY` can supply the same default.
 Choose the trusted branch explicitly; implicit latest-run lookup considers only
 successful `push` runs. Use `--run-id` for a reviewed manual run, or use
 `--artifact` and `--pattern` to select artifacts.

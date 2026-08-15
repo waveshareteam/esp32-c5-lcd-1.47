@@ -1,7 +1,8 @@
 # Shared Configuration
 
 `ci.json` is the single source of truth for the CI framework versions, Arduino
-CLI version, ESP32-C5 board options, and the `0x2000` bootloader offset.
+CLI version, ESP32-C5 board options (including USB CDC on boot), and the
+`0x2000` bootloader offset.
 Discovery, packaging, and archive validation read this file before producing or
 accepting GitHub Actions artifacts.
 

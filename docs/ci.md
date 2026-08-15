@@ -32,11 +32,13 @@ the repository's default branch, before any release build proceeds.
 ## Arduino Board Options
 
 Arduino uses the ESP32-C5 board with 4 MB Flash, no PSRAM, 80 MHz QIO flash,
-921600 upload speed, and the `huge_app` partition scheme. Its generated table
-provides a 3 MiB application slot and a `0xE0000`-byte (896 KiB) SPIFFS
-partition; the Arduino menu rounds this to "1MB SPIFFS." The larger application
-slot is required by the integrated board showcase. The complete FQBN is stored
-in `config/ci.json`. Libraries under the
+921600 upload speed, USB CDC enabled on boot, and the `huge_app` partition
+scheme. Its generated table provides a 3 MiB application slot and a
+`0xE0000`-byte (896 KiB) SPIFFS partition; the Arduino menu rounds this to
+"1MB SPIFFS." The larger application slot is required by the integrated board
+showcase. The complete FQBN is stored in `config/ci.json`, and CI checks the
+Arduino Core's expanded properties before compiling so a disabled USB CDC
+configuration cannot be released. Libraries under the
 repository-root `libraries/` directory are passed explicitly to Arduino CLI;
 library-owned examples are not product CI inputs. Build outputs stay under the
 CI build directory and are not exported back into the source sketch folders.
