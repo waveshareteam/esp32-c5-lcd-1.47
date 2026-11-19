@@ -1,18 +1,20 @@
 # Factory Firmware
 
-`ESP32-C5-LCD-1.47-Test.bin` is a complete factory test and recovery image for
-ESP32-C5-LCD-1.47. Flash the file at offset `0x0`; the first Espressif image
-header is at offset `0x2000`.
+[English](README.md) | [简体中文](README_ZH.md)
 
-Before distribution or recovery use, verify the checked-in file against
-`config/factory-firmware.json`:
+This directory stores the tested factory image for the ESP32-C5-LCD-1.47 development board.
 
-```bash
-python3 releases/validate_factory_firmware.py
-```
+| File | Purpose |
+| --- | --- |
+| [ESP32-C5-LCD-1.47_FactoryOnly_20260618.bin](ESP32-C5-LCD-1.47_FactoryOnly_20260618.bin) | Factory recovery firmware for the ESP32-C5-LCD-1.47 board, dated 20260618. Flash from `0x0`. |
 
-The current pinned image is 1,388,832 bytes with SHA-256
-`6b6ef3729df2a442c94a897ac789fe9d3bcf0be72378a1138e92b5c713267724`.
-Factory firmware source and a reproducible build recipe are not included in
-this repository. No separate factory-demo microSD runtime resources are stored
-here; the maintained microSD examples create their own test files.
+Before flashing:
+
+- Back up any device-specific data that must be preserved.
+- Confirm the board model and hardware revision.
+- Erase the target device before writing the merged image.
+- Follow the flashing procedure in the product documentation.
+
+SHA-256: `6B6EF3729DF2A442C94A897AC789FE9D3BCF0BE72378A1138E92B5C713267724`
+
+This file is a single merged BIN for factory recovery.
